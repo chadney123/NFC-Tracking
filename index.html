@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Professional Staff Tracker</title>
+    <style>
+        body { transition: background-color 0.6s ease; background-color: #2c3e50; font-family: 'Segoe UI', sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; color: white; text-align: center; }
+        .amber { background-color: #f39c12 !important; }
+        #status { font-size: 2.2rem; font-weight: bold; margin-bottom: 5px; }
+        input { padding: 18px; font-size: 1.4rem; border-radius: 12px; border: none; margin-bottom: 20px; width: 85%; max-width: 350px; text-align: center; }
+        button { padding: 20px 50px; font-size: 1.3rem; cursor: pointer; border: none; border-radius: 50px; background: #3498db; color: white; font-weight: bold; }
+        #track-info { position: fixed; bottom: 15px; font-size: 0.8rem; opacity: 0.5; }
+    </style>
+</head>
+<body>
+
+    <div id="status">System Standby</div>
+    <div id="sub-status">Enter name to begin</div>
+
+    <div id="ui-container">
+        <input type="text" id="userName" placeholder="Staff Name">
+        <button id="startBtn">Begin Shift</button>
+    </div>
+
+    <div id="track-info">GPS: Waiting | Reset: 08:00 AM</div>
+
+    <script>
+        let breadcrumbs = [];
+        let trackTimer = null;
+        let activeTag = null;
+
+        // --- AIRTABLE CONFIG ---
+        const AIRTABLE_API_KEY = "YOUR_PERSONAL_ACCESS_TOKEN";
+        const AIRTABLE_BASE_ID = "YOUR_BASE_ID";
+        const TABLE_NAME = "Attendance";
+
+        // --- GPS ENGINE ---
+        function startTracking() {
+            trackTimer = setInterval(() => {
+                navigator.geolocation.getCurrentPosition((pos) => {
+                    // Collect coordinates for the Map Line View
+                    const point = `${pos.coords.latitude},${pos.coords.longitude}`;
+                    breadcrumbs.push(point);
+                    document.getElementById('track-info').innerText = `GPS Active | Path Points: ${breadcrumbs.length}`;
+                }, null, { enableHighAccuracy: true });
+            }, 30000); // 30-second intervals for smoother lines
+        }
+
+        // --- DATA SYNC ---
+        async function syncToAirtable(name, action, routeStr = "") {
+            const url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${TABLE_NAME}`;
+            const data = {
+                fields: {
+                    "Staff Name": name,
+                    "Action": action,
+                    "Timestamp": new Date().toISOString(),
+                    "Route Data": routeStr
+                }
+            };
+
+            try {
+                await fetch(url, {
+                    method: "POST",
+                    headers: {
+                        "Authorization": `Bearer ${AIRTABLE_API_KEY}`,
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify(data)
+                });
+            } catch (e) { console.error("Airtable Sync Error", e); }
+        }
+
+        // --- NFC LOGIC ---
+        async function initNFC() {
+            const ndef = new NDEFReader();
+            await ndef.scan();
+            ndef.onreading = ({ serialNumber }) => {
+                const name = document.getElementById('userName').value;
+                if (!activeTag) {
+                    // START
+                    activeTag = serialNumber;
+                    document.body.classList.add('amber');
+                    document.getElementById('status').innerText = "Shift Active";
+                    startTracking();
+                    syncToAirtable(name, "IN");
+                } else if (activeTag === serialNumber) {
+                    // STOP
+                    clearInterval(trackTimer);
+                    const finalRoute = breadcrumbs.join(" | "); // Save all points
+                    syncToAirtable(name, "OUT", finalRoute);
+                    document.getElementById('status').innerText = "Shift Logged";
+                    setTimeout(() => location.reload(), 4000);
+                }
+            };
+        }
+
+        document.getElementById('startBtn').onclick = async () => {
+            if(!document.getElementById('userName').value) return alert("Enter Name");
+            await initNFC();
+            document.getElementById('ui-container').style.display = 'none';
+        };
+
+        // 8AM RESET
+        const now = new Date();
+        const reset = new Date();
+        reset.setHours(8,0,0,0);
+        if(now > reset) reset.setDate(reset.getDate()+1);
+        setTimeout(() => location.reload(), reset - now);
+    </script>
+</body>
+</html>
