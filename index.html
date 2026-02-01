@@ -1,12 +1,15 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <link rel="manifest" href="manifest.json">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>NFC Tracker Pro</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#2ecc71">
+    
     <style>
         body { transition: background-color 0.6s ease; background-color: #2ecc71; font-family: 'Segoe UI', sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; color: white; text-align: center; overflow: hidden; }
         .amber { background-color: #f39c12 !important; }
@@ -28,7 +31,7 @@
         <button id="startBtn">Initialize Kiosk</button>
     </div>
 
-    <div id="info">App Refesh: 08:00 | Wake Lock: Off</div>
+    <div id="info">App Refresh: 08:00 | Mode: Standalone Ready</div>
 
     <script>
         const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwy-w8ElFkhwGiUiCmc8QiqsHkjI04c-zLW4vJuXaWSBjpLUziiO-WiH6Ld9_p9cTiJBw/exec"; 
@@ -44,14 +47,12 @@
         let gpsWatchId = null;
         let breadcrumbs = [];
 
-        // --- 1. TIME CHECK ---
         function isTrackingWindow() {
             const now = new Date();
             const currentMin = (now.getHours() * 60) + now.getMinutes();
-            return currentMin >= 165 && currentMin < 480; // 2:45 AM (165m) to 8:00 AM (480m)
+            return currentMin >= 165 && currentMin < 480; 
         }
 
-        // --- 2. GPS LOGIC ---
         function startTracking() {
             if (!isTrackingWindow()) return;
             if ("geolocation" in navigator) {
@@ -68,7 +69,6 @@
             gpsWatchId = null;
         }
 
-        // --- 3. GOOGLE SHEETS SYNC ---
         async function syncData(tagId, tagText, action) {
             let mapUrl = "N/A";
             if (action === "OUT" && breadcrumbs.length > 0) {
@@ -86,22 +86,19 @@
 
             try {
                 fetch(WEB_APP_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify(payload) });
-            } catch (e) { console.warn("Sync failed, cached locally."); }
+            } catch (e) { console.warn("Sync failed."); }
         }
 
-        // --- 4. NFC & SESSION ---
         function processScan(tagText, serial) {
             if (!activeTagText) {
-                // CLOCK IN
                 activeTagText = tagText;
                 breadcrumbs = []; 
                 body.classList.add('amber');
                 statusDisplay.innerText = "Clocked In";
-                subStatus.innerText = isTrackingWindow() ? "Active Session" : "GPS Inactive (Outside Hours)";
+                subStatus.innerText = isTrackingWindow() ? "GPS Active" : "GPS Inactive";
                 startTracking();
                 syncData(serial, tagText, "IN");
             } else if (activeTagText === tagText) {
-                // CLOCK OUT
                 stopTracking();
                 syncData(serial, tagText, "OUT");
                 activeTagText = null;
@@ -129,11 +126,10 @@
             }
         }
 
-        // --- 5. INITIALIZE ---
         document.getElementById('startBtn').onclick = async () => { 
             if(!nameInput.value.trim()) return alert("Enter name");
             inputContainer.style.display = 'none';
-            statusDisplay.innerText = "Initializing...";
+            statusDisplay.innerText = "Initializing System...";
             
             try { await startNFC(); } catch (e) {}
             try { if ('wakeLock' in navigator) await navigator.wakeLock.request('screen'); } catch (e) {}
@@ -142,10 +138,10 @@
             subStatus.innerText = "Tap Tag to Clock In";
         };
 
-        // This registers a simple service worker to enable "App Mode"
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js').catch(err => console.log(err));
-}
+        // Service Worker Registration for "App Mode"
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js').catch(err => console.log(err));
+        }
     </script>
 </body>
 </html>
