@@ -1,3 +1,3 @@
 self.addEventListener('fetch', function(event) {
-  // This allows the app to load while offline
+    // Allows the PWA to be installable
 });
