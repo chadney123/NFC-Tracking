@@ -95,7 +95,7 @@
                 breadcrumbs = []; 
                 body.classList.add('amber');
                 statusDisplay.innerText = "Clocked In";
-                subStatus.innerText = isTrackingWindow() ? "GPS Active" : "GPS Inactive";
+                subStatus.innerText = isTrackingWindow() ? "Active Session" : "GPS Inactive";
                 startTracking();
                 syncData(serial, tagText, "IN");
             } else if (activeTagText === tagText) {
