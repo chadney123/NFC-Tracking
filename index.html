@@ -61,25 +61,57 @@
         }
 
         // --- 3. GEOLOCATION FETCH ---
-        function getCoordinates() {
-            return new Promise((resolve) => {
-                if (!navigator.geolocation) {
-                    resolve("GPS Not Supported");
-                    return;
-                }
-                navigator.geolocation.getCurrentPosition(
-                    (position) => {
-                        const lat = position.coords.latitude;
-                        const lon = position.coords.longitude;
-                        // Returns a clickable Google Maps Link
-                        resolve(`https://www.google.com/maps?q=${lat},${lon}`);
-                    },
-                    () => resolve("Location Access Denied"),
-                    { enableHighAccuracy: true, timeout: 5000 }
-                );
-            });
+        let breadcrumbs = []; // This stores the whole path
+
+        function startTracking() {
+            if (!isTrackingWindow()) return;
+
+            if ("geolocation" in navigator) {
+                // watchPosition keeps the GPS active and records movement
+                gpsWatchId = navigator.geolocation.watchPosition((pos) => {
+                    if (!isTrackingWindow()) { 
+                        stopTracking(); 
+                        return; 
+                    }
+                    
+                    const pt = `${pos.coords.latitude.toFixed(5)},${pos.coords.longitude.toFixed(5)}`;
+                    
+                    // Only add the point if they've actually moved (prevents duplicate points)
+                    if (breadcrumbs[breadcrumbs.length - 1] !== pt) {
+                        breadcrumbs.push(pt);
+                        console.log("Point recorded: " + pt);
+                    }
+                }, null, { 
+                    enableHighAccuracy: true,
+                    maximumAge: 30000, // Check every 30 seconds
+                    timeout: 27000 
+                });
+            }
         }
 
+        // Modified Sync to send the WHOLE path
+        async function syncData(tagId, tagText, action) {
+            let mapUrl = "N/A";
+            
+            if (action === "OUT" && breadcrumbs.length > 0) {
+                // This creates a Google Maps URL with the entire trail
+                mapUrl = "https://www.google.com/maps/dir/" + breadcrumbs.join("/");
+            }
+
+            const payload = { 
+                id: tagId, 
+                tagText: tagText, 
+                name: nameInput.value, 
+                action: action, 
+                location: mapUrl, // This is now a full route link
+                timestamp: new Date().toISOString() 
+            };
+
+            try {
+                fetch(WEB_APP_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify(payload) });
+            } catch (e) { console.warn("Sync failed."); }
+        }
+        
         // --- 4. OFFLINE SYNC LOGIC ---
         async function queueData(id, name, action, locationUrl) {
             const cleanId = id.replace(/[^\x20-\x7E]/g, '').trim(); 
