@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>NFC Tracking Kiosk</title>
+    <title>NFC Kiosk</title>
     <link rel="manifest" href="manifest.json">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="theme-color" content="#2ecc71">
@@ -28,7 +28,7 @@
         <button id="startBtn">Initialize Kiosk</button>
     </div>
 
-    <div id="lock-info">Wake Lock: Inactive | GPS: Ready</div>
+    <div id="lock-info">Wake Lock: Inactive | Reset: 8am</div>
 
     <script>
         const body = document.body;
@@ -56,7 +56,7 @@
         async function requestWakeLock() {
             try {
                 wakeLock = await navigator.wakeLock.request('screen');
-                lockInfo.innerText = "Wake Lock: Active | GPS: Enabled";
+                lockInfo.innerText = "Wake Lock: Active | Reset: 8AM";
             } catch (err) { console.error(err); }
         }
 
@@ -131,7 +131,7 @@
                         if (isLocked) return; 
                         
                         // Briefly show loading while GPS is fetched
-                        subStatus.innerText = "Fetching Location...";
+                        subStatus.innerText = "Reading NFC...";
                         const locationUrl = await getCoordinates();
 
                         let textData = "";
@@ -159,7 +159,7 @@
                 activeSessionTagId = id;
                 body.classList.add('amber');
                 statusDisplay.innerText = "Clocked In";
-                subStatus.innerText = "Tracking Point Captured";
+                subStatus.innerText = "Active Session";
                 queueData(id, name, "IN", locationUrl);
             } else if (activeSessionTagId === id) {
                 activeSessionTagId = null;
