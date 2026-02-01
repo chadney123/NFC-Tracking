@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>NFC Hidden Tracker</title>
+    <title>NFC Offline Kiosk</title>
     <link rel="manifest" href="manifest.json">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="theme-color" content="#2ecc71">
@@ -41,70 +41,18 @@
         let activeSessionTagId = null; 
         let isLocked = false;
         let wakeLock = null;
-        let gpsWatchId = null; // Background tracker ID
 
-        // --- CONFIG ---
-        const TRACCAR_URL = "http://5.66.194.151:5055"; // Replace with your Traccar IP/Port
-
-        // --- 1. HIDDEN TRACCAR SYNC ---
-        async function syncToTraccar(pos) {
-            const name = nameInput.value.replace(/\s+/g, '_');
-            const params = new URLSearchParams({
-                id: name,
-                lat: pos.coords.latitude,
-                lon: pos.coords.longitude,
-                timestamp: Math.floor(Date.now() / 1000),
-                speed: pos.coords.speed || 0,
-                accuracy: pos.coords.accuracy || 0
-            });
-
-            try {
-                // Using no-cors to silently fire the request to the OsmAnd port
-                await fetch(`${TRACCAR_URL}?${params.toString()}`, { method: 'GET', mode: 'no-cors' });
-            } catch (e) { console.log("Traccar update pending..."); }
+        // --- 1. DAILY 8AM RESET ---
+        function scheduleMorningReset() {
+            const now = new Date();
+            const resetTime = new Date();
+            resetTime.setHours(8, 0, 0, 0);
+            if (now > resetTime) resetTime.setDate(resetTime.getDate() + 1);
+            setTimeout(() => { location.reload(); }, resetTime - now);
         }
+        scheduleMorningReset();
 
-        // --- 2. GPS CONTROL ---
-        function startTracking() {
-            if ("geolocation" in navigator) {
-                gpsWatchId = navigator.geolocation.watchPosition(
-                    (pos) => syncToTraccar(pos),
-                    (err) => console.warn("GPS Error: ", err),
-                    { enableHighAccuracy: true, maximumAge: 30000, timeout: 27000 }
-                );
-            }
-        }
-
-        function stopTracking() {
-            if (gpsWatchId) {
-                navigator.geolocation.clearWatch(gpsWatchId);
-                gpsWatchId = null;
-            }
-        }
-
-        // --- 3. SESSION & NFC LOGIC ---
-        function processScan(id) {
-            const name = nameInput.value;
-            if (!activeSessionTagId) {
-                activeSessionTagId = id;
-                body.classList.add('amber');
-                statusDisplay.innerText = "Shift Active";
-                subStatus.innerText = "Tracking Hidden...";
-                startTracking(); // START TRACCAR
-                queueData(id, name, "IN");
-            } else if (activeSessionTagId === id) {
-                activeSessionTagId = null;
-                body.classList.remove('amber');
-                statusDisplay.innerText = "Shift Ended";
-                stopTracking(); // STOP TRACCAR
-                queueData(id, name, "OUT");
-                setTimeout(() => location.reload(), 3000);
-            } else {
-                statusDisplay.innerText = "Wrong Tag!";
-            }
-        }
-
-        // --- 4. CORE KIOSK FUNCTIONS ---
+        // --- 2. WAKE LOCK ---
         async function requestWakeLock() {
             try {
                 wakeLock = await navigator.wakeLock.request('screen');
@@ -112,28 +60,94 @@
             } catch (err) { console.error(err); }
         }
 
+        // --- 3. OFFLINE SYNC LOGIC ---
         async function queueData(id, name, action) {
             const cleanId = id.replace(/[^\x20-\x7E]/g, '').trim(); 
             const payload = { id: cleanId, name, action, timestamp: new Date().toISOString() };
+
             let queue = JSON.parse(localStorage.getItem('nfc_queue') || '[]');
             queue.push(payload);
             localStorage.setItem('nfc_queue', JSON.stringify(queue));
+
             processQueue();
         }
 
         async function processQueue() {
-            const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyoBYr3TIspFuqpABPZLglegcmjeNshljGK-MkVuNhDFZnOKF-LlFGVK7BClwFYUTIE2g/exec";
-            let queue = JSON.parse(localStorage.getItem('nfc_queue') || '[]');
-            if (queue.length === 0 || !navigator.onLine) return;
-            for (const item of [...queue]) {
-                try {
-                    await fetch(WEB_APP_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify(item) });
-                    queue = queue.filter(q => q.timestamp !== item.timestamp);
-                    localStorage.setItem('nfc_queue', JSON.stringify(queue));
-                } catch (e) { break; }
+const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzWCkrwdK-SBE9XSEXWM605dXZTSOmyesbM0RraDr-dpy8RS4v8gmXFeCnTQxoKuP9X3g/exec";
+        let breadcrumbs = [];
+        let gpsWatchId = null;
+        let activeTag = null;
+        let wakeLock = null;
+
+        // --- 1. TIME CHECK LOGIC ---
+        function isTrackingWindow() {
+            const now = new Date();
+            const hours = now.getHours();
+            const minutes = now.getMinutes();
+            const currentTimeInMinutes = (hours * 60) + minutes;
+
+            const startMinutes = (2 * 60) + 45; // 2:45 AM
+            const endMinutes = (8 * 60);       // 8:00 AM
+
+            return currentTimeInMinutes >= startMinutes && currentTimeInMinutes < endMinutes;
+        }
+
+        // --- 2. GPS CONTROL WITH TIME GATE ---
+        function startGPS() {
+            if (!isTrackingWindow()) {
+                document.getElementById('track-info').innerText = "GPS Inactive (Outside 2:45am-8am)";
+                return; 
+            }
+
+            if ("geolocation" in navigator) {
+                gpsWatchId = navigator.geolocation.watchPosition((pos) => {
+                    // Check time again inside the loop in case they cross the 8am threshold
+                    if (!isTrackingWindow()) {
+                        stopGPS();
+                        document.getElementById('track-info').innerText = "Tracking Stopped (8:00 AM reached)";
+                        return;
+                    }
+
+                    const point = `${pos.coords.latitude.toFixed(5)},${pos.coords.longitude.toFixed(5)}`;
+                    if (breadcrumbs[breadcrumbs.length - 1] !== point) {
+                        breadcrumbs.push(point);
+                        document.getElementById('track-info').innerText = `Tracking: ${breadcrumbs.length} points`;
+                    }
+                }, null, { enableHighAccuracy: true });
             }
         }
 
+        function stopGPS() {
+            if (gpsWatchId) {
+                navigator.geolocation.clearWatch(gpsWatchId);
+                gpsWatchId = null;
+            }
+        }
+
+        // --- 3. SESSION LOGIC ---
+        async function sendData(action) {
+            const name = document.getElementById('userName').value;
+            // Only generate a map URL if we actually have points
+            const mapUrl = breadcrumbs.length > 0 
+                ? "https://www.google.com/maps/dir/" + breadcrumbs.join("/") 
+                : "No GPS recorded (Outside tracking hours)";
+
+            const payload = {
+                id: activeTag,
+                name: name,
+                action: action,
+                location: mapUrl,
+                timestamp: new Date().toISOString()
+            };
+
+            try {
+                await fetch(WEB_APP_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify(payload) });
+            } catch (e) { console.error("Sync Failed", e); }
+        }
+
+       window.addEventListener('online', processQueue);
+
+        // --- 4. NFC LOGIC (READS TEXT) ---
         async function startNFC() {
             if ("NDEFReader" in window) {
                 try {
@@ -141,14 +155,20 @@
                     await ndef.scan();
                     statusDisplay.innerText = "Ready, " + nameInput.value;
                     subStatus.innerText = "Tap Tag to Clock In";
-                    ndef.onreading = ({ message, serialNumber }) => {
-                        if (isLocked) return;
+
+                    ndef.onreading = async ({ message, serialNumber }) => {
+                        if (isLocked) return; 
                         let textData = "";
                         const decoder = new TextDecoder();
                         for (const record of message.records) {
-                            if (record.recordType === "text") { textData = decoder.decode(record.data); break; }
+                            if (record.recordType === "text") {
+                                textData = decoder.decode(record.data);
+                                break; 
+                            }
                         }
-                        processScan(textData || serialNumber);
+                        const finalId = textData || serialNumber;
+                        if (finalId) processScan(finalId);
+                        
                         isLocked = true;
                         setTimeout(() => { isLocked = false; }, 5000);
                     };
@@ -156,19 +176,37 @@
             }
         }
 
+        // --- 5. SESSION LOGIC ---
+        function processScan(id) {
+            const name = nameInput.value;
+            if (!activeSessionTagId) {
+                activeSessionTagId = id;
+                body.classList.add('amber');
+                statusDisplay.innerText = "Clocked In";
+                subStatus.innerText = "Active Session";
+                queueData(id, name, "IN");
+            } else if (activeSessionTagId === id) {
+                activeSessionTagId = null;
+                body.classList.remove('amber');
+                statusDisplay.innerText = "Clocked Out";
+                subStatus.innerText = "Success, " + name;
+                queueData(id, name, "OUT");
+                setTimeout(() => {
+                    if (!activeSessionTagId) {
+                        statusDisplay.innerText = "Ready, " + name;
+                        subStatus.innerText = "Tap Tag to Clock In";
+                    }
+                }, 3000);
+            } else {
+                statusDisplay.innerText = "Wrong Tag!";
+            }
+        }
+
         document.getElementById('startBtn').onclick = () => { 
             if(!nameInput.value.trim()) return alert("Enter name");
-            startNFC(); 
-            requestWakeLock();
+            startNFC(); requestWakeLock();
             inputContainer.style.visibility = 'hidden'; 
         };
-
-        // Morning Reset
-        const now = new Date();
-        const resetTime = new Date();
-        resetTime.setHours(8, 0, 0, 0);
-        if (now > resetTime) resetTime.setDate(resetTime.getDate() + 1);
-        setTimeout(() => { location.reload(); }, resetTime - now);
     </script>
 </body>
 </html>
