@@ -3,110 +3,172 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Professional Staff Tracker</title>
+    <title>NFC Hidden Tracker</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#2ecc71">
     <style>
-        body { transition: background-color 0.6s ease; background-color: #2c3e50; font-family: 'Segoe UI', sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; color: white; text-align: center; }
+        body { transition: background-color 0.6s ease; background-color: #2ecc71; font-family: 'Segoe UI', sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; color: white; text-align: center; overflow: hidden; }
         .amber { background-color: #f39c12 !important; }
         #status { font-size: 2.2rem; font-weight: bold; margin-bottom: 5px; }
+        #sub-status { font-size: 1.1rem; opacity: 0.9; margin-bottom: 30px; height: 1.2em; }
         input { padding: 18px; font-size: 1.4rem; border-radius: 12px; border: none; margin-bottom: 20px; width: 85%; max-width: 350px; text-align: center; }
-        button { padding: 20px 50px; font-size: 1.3rem; cursor: pointer; border: none; border-radius: 50px; background: #3498db; color: white; font-weight: bold; }
-        #track-info { position: fixed; bottom: 15px; font-size: 0.8rem; opacity: 0.5; }
+        button { padding: 20px 50px; font-size: 1.3rem; cursor: pointer; border: none; border-radius: 50px; background: white; color: #2ecc71; font-weight: bold; }
+        #lock-info { position: fixed; bottom: 15px; font-size: 0.75rem; opacity: 0.5; }
+        #input-container { width: 100%; display: flex; flex-direction: column; align-items: center; }
     </style>
 </head>
 <body>
 
-    <div id="status">System Standby</div>
+    <div id="status">Welcome</div>
     <div id="sub-status">Enter name to begin</div>
 
-    <div id="ui-container">
-        <input type="text" id="userName" placeholder="Staff Name">
-        <button id="startBtn">Begin Shift</button>
+    <div id="input-container">
+        <input type="text" id="userName" placeholder="Type Name Here..." autocomplete="off">
+        <button id="startBtn">Initialize Kiosk</button>
     </div>
 
-    <div id="track-info">GPS: Waiting | Reset: 08:00 AM</div>
+    <div id="lock-info">Wake Lock: Inactive | Daily Reset: 08:00 AM</div>
 
     <script>
-        let breadcrumbs = [];
-        let trackTimer = null;
-        let activeTag = null;
+        const body = document.body;
+        const statusDisplay = document.getElementById('status');
+        const subStatus = document.getElementById('sub-status');
+        const nameInput = document.getElementById('userName');
+        const inputContainer = document.getElementById('input-container');
+        const lockInfo = document.getElementById('lock-info');
+        
+        let activeSessionTagId = null; 
+        let isLocked = false;
+        let wakeLock = null;
+        let gpsWatchId = null; // Background tracker ID
 
-        // --- AIRTABLE CONFIG ---
-        const AIRTABLE_API_KEY = "YOUR_PERSONAL_ACCESS_TOKEN";
-        const AIRTABLE_BASE_ID = "YOUR_BASE_ID";
-        const TABLE_NAME = "Attendance";
+        // --- CONFIG ---
+        const TRACCAR_URL = "5.66.194.151"; // Replace with your Traccar IP/Port
 
-        // --- GPS ENGINE ---
-        function startTracking() {
-            trackTimer = setInterval(() => {
-                navigator.geolocation.getCurrentPosition((pos) => {
-                    // Collect coordinates for the Map Line View
-                    const point = `${pos.coords.latitude},${pos.coords.longitude}`;
-                    breadcrumbs.push(point);
-                    document.getElementById('track-info').innerText = `GPS Active | Path Points: ${breadcrumbs.length}`;
-                }, null, { enableHighAccuracy: true });
-            }, 30000); // 30-second intervals for smoother lines
-        }
-
-        // --- DATA SYNC ---
-        async function syncToAirtable(name, action, routeStr = "") {
-            const url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${TABLE_NAME}`;
-            const data = {
-                fields: {
-                    "Staff Name": name,
-                    "Action": action,
-                    "Timestamp": new Date().toISOString(),
-                    "Route Data": routeStr
-                }
-            };
+        // --- 1. HIDDEN TRACCAR SYNC ---
+        async function syncToTraccar(pos) {
+            const name = nameInput.value.replace(/\s+/g, '_');
+            const params = new URLSearchParams({
+                id: name,
+                lat: pos.coords.latitude,
+                lon: pos.coords.longitude,
+                timestamp: Math.floor(Date.now() / 1000),
+                speed: pos.coords.speed || 0,
+                accuracy: pos.coords.accuracy || 0
+            });
 
             try {
-                await fetch(url, {
-                    method: "POST",
-                    headers: {
-                        "Authorization": `Bearer ${AIRTABLE_API_KEY}`,
-                        "Content-Type": "application/json"
-                    },
-                    body: JSON.stringify(data)
-                });
-            } catch (e) { console.error("Airtable Sync Error", e); }
+                // Using no-cors to silently fire the request to the OsmAnd port
+                await fetch(`${TRACCAR_URL}?${params.toString()}`, { method: 'GET', mode: 'no-cors' });
+            } catch (e) { console.log("Traccar update pending..."); }
         }
 
-        // --- NFC LOGIC ---
-        async function initNFC() {
-            const ndef = new NDEFReader();
-            await ndef.scan();
-            ndef.onreading = ({ serialNumber }) => {
-                const name = document.getElementById('userName').value;
-                if (!activeTag) {
-                    // START
-                    activeTag = serialNumber;
-                    document.body.classList.add('amber');
-                    document.getElementById('status').innerText = "Shift Active";
-                    startTracking();
-                    syncToAirtable(name, "IN");
-                } else if (activeTag === serialNumber) {
-                    // STOP
-                    clearInterval(trackTimer);
-                    const finalRoute = breadcrumbs.join(" | "); // Save all points
-                    syncToAirtable(name, "OUT", finalRoute);
-                    document.getElementById('status').innerText = "Shift Logged";
-                    setTimeout(() => location.reload(), 4000);
-                }
-            };
+        // --- 2. GPS CONTROL ---
+        function startTracking() {
+            if ("geolocation" in navigator) {
+                gpsWatchId = navigator.geolocation.watchPosition(
+                    (pos) => syncToTraccar(pos),
+                    (err) => console.warn("GPS Error: ", err),
+                    { enableHighAccuracy: true, maximumAge: 30000, timeout: 27000 }
+                );
+            }
         }
 
-        document.getElementById('startBtn').onclick = async () => {
-            if(!document.getElementById('userName').value) return alert("Enter Name");
-            await initNFC();
-            document.getElementById('ui-container').style.display = 'none';
+        function stopTracking() {
+            if (gpsWatchId) {
+                navigator.geolocation.clearWatch(gpsWatchId);
+                gpsWatchId = null;
+            }
+        }
+
+        // --- 3. SESSION & NFC LOGIC ---
+        function processScan(id) {
+            const name = nameInput.value;
+            if (!activeSessionTagId) {
+                activeSessionTagId = id;
+                body.classList.add('amber');
+                statusDisplay.innerText = "Shift Active";
+                subStatus.innerText = "Tracking Hidden...";
+                startTracking(); // START TRACCAR
+                queueData(id, name, "IN");
+            } else if (activeSessionTagId === id) {
+                activeSessionTagId = null;
+                body.classList.remove('amber');
+                statusDisplay.innerText = "Shift Ended";
+                stopTracking(); // STOP TRACCAR
+                queueData(id, name, "OUT");
+                setTimeout(() => location.reload(), 3000);
+            } else {
+                statusDisplay.innerText = "Wrong Tag!";
+            }
+        }
+
+        // --- 4. CORE KIOSK FUNCTIONS ---
+        async function requestWakeLock() {
+            try {
+                wakeLock = await navigator.wakeLock.request('screen');
+                lockInfo.innerText = "Wake Lock: Active | Reset: 08:00 AM";
+            } catch (err) { console.error(err); }
+        }
+
+        async function queueData(id, name, action) {
+            const cleanId = id.replace(/[^\x20-\x7E]/g, '').trim(); 
+            const payload = { id: cleanId, name, action, timestamp: new Date().toISOString() };
+            let queue = JSON.parse(localStorage.getItem('nfc_queue') || '[]');
+            queue.push(payload);
+            localStorage.setItem('nfc_queue', JSON.stringify(queue));
+            processQueue();
+        }
+
+        async function processQueue() {
+            const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyoBYr3TIspFuqpABPZLglegcmjeNshljGK-MkVuNhDFZnOKF-LlFGVK7BClwFYUTIE2g/exec";
+            let queue = JSON.parse(localStorage.getItem('nfc_queue') || '[]');
+            if (queue.length === 0 || !navigator.onLine) return;
+            for (const item of [...queue]) {
+                try {
+                    await fetch(WEB_APP_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify(item) });
+                    queue = queue.filter(q => q.timestamp !== item.timestamp);
+                    localStorage.setItem('nfc_queue', JSON.stringify(queue));
+                } catch (e) { break; }
+            }
+        }
+
+        async function startNFC() {
+            if ("NDEFReader" in window) {
+                try {
+                    const ndef = new NDEFReader();
+                    await ndef.scan();
+                    statusDisplay.innerText = "Ready, " + nameInput.value;
+                    subStatus.innerText = "Tap Tag to Clock In";
+                    ndef.onreading = ({ message, serialNumber }) => {
+                        if (isLocked) return;
+                        let textData = "";
+                        const decoder = new TextDecoder();
+                        for (const record of message.records) {
+                            if (record.recordType === "text") { textData = decoder.decode(record.data); break; }
+                        }
+                        processScan(textData || serialNumber);
+                        isLocked = true;
+                        setTimeout(() => { isLocked = false; }, 5000);
+                    };
+                } catch (error) { statusDisplay.innerText = "NFC Error"; }
+            }
+        }
+
+        document.getElementById('startBtn').onclick = () => { 
+            if(!nameInput.value.trim()) return alert("Enter name");
+            startNFC(); 
+            requestWakeLock();
+            inputContainer.style.visibility = 'hidden'; 
         };
 
-        // 8AM RESET
+        // Morning Reset
         const now = new Date();
-        const reset = new Date();
-        reset.setHours(8,0,0,0);
-        if(now > reset) reset.setDate(reset.getDate()+1);
-        setTimeout(() => location.reload(), reset - now);
+        const resetTime = new Date();
+        resetTime.setHours(8, 0, 0, 0);
+        if (now > resetTime) resetTime.setDate(resetTime.getDate() + 1);
+        setTimeout(() => { location.reload(); }, resetTime - now);
     </script>
 </body>
 </html>
