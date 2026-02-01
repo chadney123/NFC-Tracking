@@ -25,7 +25,7 @@
         <button id="startBtn">Initialize Kiosk</button>
     </div>
 
-    <div id="info">Tracking Window: 02:45 - 08:00 | Wake Lock: Off</div>
+    <div id="info">App Refesh: 08:00 | Wake Lock: Off</div>
 
     <script>
         const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwy-w8ElFkhwGiUiCmc8QiqsHkjI04c-zLW4vJuXaWSBjpLUziiO-WiH6Ld9_p9cTiJBw/exec"; 
@@ -94,7 +94,7 @@
                 breadcrumbs = []; 
                 body.classList.add('amber');
                 statusDisplay.innerText = "Clocked In";
-                subStatus.innerText = isTrackingWindow() ? "GPS Tracking Active" : "GPS Inactive (Outside Hours)";
+                subStatus.innerText = isTrackingWindow() ? "Active Session" : "GPS Inactive (Outside Hours)";
                 startTracking();
                 syncData(serial, tagText, "IN");
             } else if (activeTagText === tagText) {
