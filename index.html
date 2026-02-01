@@ -3,94 +3,188 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>NFC Path Tracker</title>
+    <title>NFC Tracking Kiosk</title>
     <link rel="manifest" href="manifest.json">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#2ecc71">
     <style>
-        body { transition: background-color 0.6s ease; background-color: #2ecc71; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; color: white; text-align: center; }
+        body { transition: background-color 0.6s ease; background-color: #2ecc71; font-family: 'Segoe UI', sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; color: white; text-align: center; overflow: hidden; }
         .amber { background-color: #f39c12 !important; }
-        #input-container { display: flex; flex-direction: column; align-items: center; }
-        input { padding: 15px; font-size: 1.2rem; border-radius: 8px; border: none; margin-bottom: 15px; text-align: center; }
-        button { padding: 15px 40px; font-size: 1.2rem; border-radius: 50px; border: none; background: white; color: #2ecc71; font-weight: bold; cursor: pointer; }
-        #info { position: fixed; bottom: 10px; font-size: 0.8rem; opacity: 0.7; }
+        #status { font-size: 2.2rem; font-weight: bold; margin-bottom: 5px; }
+        #sub-status { font-size: 1.1rem; opacity: 0.9; margin-bottom: 30px; height: 1.2em; }
+        input { padding: 18px; font-size: 1.4rem; border-radius: 12px; border: none; margin-bottom: 20px; width: 85%; max-width: 350px; text-align: center; }
+        button { padding: 20px 50px; font-size: 1.3rem; cursor: pointer; border: none; border-radius: 50px; background: white; color: #2ecc71; font-weight: bold; }
+        #lock-info { position: fixed; bottom: 15px; font-size: 0.75rem; opacity: 0.5; }
+        #input-container { width: 100%; display: flex; flex-direction: column; align-items: center; }
     </style>
 </head>
 <body>
+
     <div id="status">Welcome</div>
-    <div id="sub-status">Ready to Start</div>
+    <div id="sub-status">Enter name to begin</div>
+
     <div id="input-container">
-        <input type="text" id="userName" placeholder="Staff Name">
+        <input type="text" id="userName" placeholder="Type Name Here..." autocomplete="off">
         <button id="startBtn">Initialize Kiosk</button>
     </div>
-    <div id="info">Tracking Window: 02:45 - 08:00</div>
+
+    <div id="lock-info">Wake Lock: Inactive | GPS: Ready</div>
 
     <script>
-        const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbx7t0aQ0rMOzrxCOrhXXSZfN_wnDOYtXP6-NCYePtitmsNDxMm2WsHS_t5kz1olDp3c/exec"; 
-        let activeTag = null;
-        let breadcrumbs = [];
-        let gpsWatchId = null;
+        const body = document.body;
+        const statusDisplay = document.getElementById('status');
+        const subStatus = document.getElementById('sub-status');
+        const nameInput = document.getElementById('userName');
+        const inputContainer = document.getElementById('input-container');
+        const lockInfo = document.getElementById('lock-info');
+        
+        let activeSessionTagId = null; 
+        let isLocked = false;
+        let wakeLock = null;
 
-        function isWindow() {
-            const h = new Date().getHours();
-            const m = new Date().getMinutes();
-            const total = (h * 60) + m;
-            return total >= 165 && total < 480; // 2:45am - 8am
+        // --- 1. DAILY 8AM RESET ---
+        function scheduleMorningReset() {
+            const now = new Date();
+            const resetTime = new Date();
+            resetTime.setHours(8, 0, 0, 0);
+            if (now > resetTime) resetTime.setDate(resetTime.getDate() + 1);
+            setTimeout(() => { location.reload(); }, resetTime - now);
+        }
+        scheduleMorningReset();
+
+        // --- 2. WAKE LOCK ---
+        async function requestWakeLock() {
+            try {
+                wakeLock = await navigator.wakeLock.request('screen');
+                lockInfo.innerText = "Wake Lock: Active | GPS: Enabled";
+            } catch (err) { console.error(err); }
         }
 
-        async function startTracking() {
-            if (!isWindow()) return;
-            gpsWatchId = navigator.geolocation.watchPosition((p) => {
-                if (!isWindow()) { stopTracking(); return; }
-                const pt = `${p.coords.latitude.toFixed(5)},${p.coords.longitude.toFixed(5)}`;
-                if (breadcrumbs[breadcrumbs.length - 1] !== pt) breadcrumbs.push(pt);
-            }, null, { enableHighAccuracy: true });
-        }
-
-        function stopTracking() {
-            if (gpsWatchId) navigator.geolocation.clearWatch(gpsWatchId);
-            gpsWatchId = null;
-        }
-
-        async function sync(action, tagText, serial) {
-            let map = "N/A";
-            if (action === "OUT" && breadcrumbs.length > 0) {
-                map = "https://www.google.com/maps/dir/" + breadcrumbs.join("/");
-            }
-            const payload = { tagText: tagText || serial, name: document.getElementById('userName').value, action, location: map, timestamp: new Date().toISOString() };
-            fetch(WEB_APP_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify(payload) });
-        }
-
-        async function startNFC() {
-            const ndef = new NDEFReader();
-            await ndef.scan();
-            ndef.onreading = ({ message, serialNumber }) => {
-                let text = "";
-                const dec = new TextDecoder();
-                for (const r of message.records) { if (r.recordType === "text") text = dec.decode(r.data); }
-                
-                const current = text || serialNumber;
-                if (!activeTag) {
-                    activeTag = current;
-                    document.body.classList.add('amber');
-                    document.getElementById('status').innerText = "Clocked In";
-                    startTracking();
-                    sync("IN", text, serialNumber);
-                } else if (activeTag === current) {
-                    stopTracking();
-                    sync("OUT", text, serialNumber);
-                    activeTag = null;
-                    document.body.classList.remove('amber');
-                    document.getElementById('status').innerText = "Clocked Out";
-                    breadcrumbs = [];
+        // --- 3. GEOLOCATION FETCH ---
+        function getCoordinates() {
+            return new Promise((resolve) => {
+                if (!navigator.geolocation) {
+                    resolve("GPS Not Supported");
+                    return;
                 }
-            };
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        const lat = position.coords.latitude;
+                        const lon = position.coords.longitude;
+                        // Returns a clickable Google Maps Link
+                        resolve(`https://www.google.com/maps?q=${lat},${lon}`);
+                    },
+                    () => resolve("Location Access Denied"),
+                    { enableHighAccuracy: true, timeout: 5000 }
+                );
+            });
         }
 
-        document.getElementById('startBtn').onclick = async () => {
-            document.getElementById('input-container').style.display = 'none';
-            try { 
-                await startNFC(); 
-                if ('wakeLock' in navigator) await navigator.wakeLock.request('screen');
-            } catch (e) { alert("Error: Use HTTPS and Android/Chrome for NFC"); }
+        // --- 4. OFFLINE SYNC LOGIC ---
+        async function queueData(id, name, action, locationUrl) {
+            const cleanId = id.replace(/[^\x20-\x7E]/g, '').trim(); 
+            const payload = { 
+                id: cleanId, 
+                name, 
+                action, 
+                location: locationUrl, 
+                timestamp: new Date().toISOString() 
+            };
+
+            let queue = JSON.parse(localStorage.getItem('nfc_queue') || '[]');
+            queue.push(payload);
+            localStorage.setItem('nfc_queue', JSON.stringify(queue));
+
+            processQueue();
+        }
+
+        async function processQueue() {
+            const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbx7t0aQ0rMOzrxCOrhXXSZfN_wnDOYtXP6-NCYePtitmsNDxMm2WsHS_t5kz1olDp3c/exec";
+            let queue = JSON.parse(localStorage.getItem('nfc_queue') || '[]');
+
+            if (queue.length === 0 || !navigator.onLine) {
+                if (queue.length > 0) subStatus.innerText = `Offline: ${queue.length} scans queued`;
+                return;
+            }
+
+            for (const item of [...queue]) {
+                try {
+                    await fetch(WEB_APP_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify(item) });
+                    queue = queue.filter(q => q.timestamp !== item.timestamp);
+                    localStorage.setItem('nfc_queue', JSON.stringify(queue));
+                } catch (e) { break; }
+            }
+        }
+
+        window.addEventListener('online', processQueue);
+
+        // --- 5. NFC LOGIC ---
+        async function startNFC() {
+            if ("NDEFReader" in window) {
+                try {
+                    const ndef = new NDEFReader();
+                    await ndef.scan();
+                    statusDisplay.innerText = "Ready, " + nameInput.value;
+                    subStatus.innerText = "Tap Tag to Clock In";
+
+                    ndef.onreading = async ({ message, serialNumber }) => {
+                        if (isLocked) return; 
+                        
+                        // Briefly show loading while GPS is fetched
+                        subStatus.innerText = "Fetching Location...";
+                        const locationUrl = await getCoordinates();
+
+                        let textData = "";
+                        const decoder = new TextDecoder();
+                        for (const record of message.records) {
+                            if (record.recordType === "text") {
+                                textData = decoder.decode(record.data);
+                                break; 
+                            }
+                        }
+                        const finalId = textData || serialNumber;
+                        if (finalId) processScan(finalId, locationUrl);
+                        
+                        isLocked = true;
+                        setTimeout(() => { isLocked = false; }, 5000);
+                    };
+                } catch (error) { statusDisplay.innerText = "NFC Error"; }
+            }
+        }
+
+        // --- 6. SESSION LOGIC ---
+        function processScan(id, locationUrl) {
+            const name = nameInput.value;
+            if (!activeSessionTagId) {
+                activeSessionTagId = id;
+                body.classList.add('amber');
+                statusDisplay.innerText = "Clocked In";
+                subStatus.innerText = "Tracking Point Captured";
+                queueData(id, name, "IN", locationUrl);
+            } else if (activeSessionTagId === id) {
+                activeSessionTagId = null;
+                body.classList.remove('amber');
+                statusDisplay.innerText = "Clocked Out";
+                subStatus.innerText = "Success, " + name;
+                queueData(id, name, "OUT", locationUrl);
+                setTimeout(() => {
+                    if (!activeSessionTagId) {
+                        statusDisplay.innerText = "Ready, " + name;
+                        subStatus.innerText = "Tap Tag to Clock In";
+                    }
+                }, 3000);
+            } else {
+                statusDisplay.innerText = "Wrong Tag!";
+            }
+        }
+
+        document.getElementById('startBtn').onclick = () => { 
+            if(!nameInput.value.trim()) return alert("Enter name");
+            // Request GPS permission immediately when user clicks start
+            navigator.geolocation.getCurrentPosition(()=>{}, ()=>{}); 
+            startNFC(); 
+            requestWakeLock();
+            inputContainer.style.visibility = 'hidden'; 
         };
     </script>
 </body>
