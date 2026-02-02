@@ -26,7 +26,7 @@
         <button id="startBtn">Begin Shift</button>
     </div>
 
-    <div id="info"> App Reset - 08:00</div>
+    <div id="info">GPS active from Login | Tracking: 02:45 - 08:00</div>
 
     <script>
         const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxNyl59VKRoc5Ae6VtO2A0xPOkPk9QFdA8Lw6IBb5HSWfX6mkGqYvtrO7_0Z1jcyCB6CQ/exec"; 
@@ -44,8 +44,8 @@
 
         // --- 1. CONTINUOUS GPS WATCH ---
         function startGlobalTracking() {
-            if ("geo" in navigator) {
-                gpsWatchId = navigator.geo.watchPosition((pos) => {
+            if ("geolocation" in navigator) {
+                gpsWatchId = navigator.geolocation.watchPosition((pos) => {
                     const now = new Date();
                     const totalMins = (now.getHours() * 60) + now.getMinutes();
                     
@@ -72,7 +72,7 @@
                 tagText: tagText, 
                 name: nameInput.value, 
                 action: action, 
-                : mapLink,
+                location: mapLink,
                 timestamp: new Date().toISOString() 
             };
 
@@ -108,7 +108,7 @@
                         activeTag = null;
                         body.classList.remove('amber');
                         statusDisplay.innerText = "Location Cleared";
-                        subStatus.innerText = "Ready for next location";
+                        subStatus.innerText = "Ready for next checkpoint";
                         setTimeout(() => {
                             statusDisplay.innerText = "Shift in Progress";
                             subStatus.innerText = "Scan NFC to log movement";
