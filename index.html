@@ -44,21 +44,32 @@
 
         // --- 1. CONTINUOUS GPS WATCH ---
         function startGlobalTracking() {
-            if ("geolocation" in navigator) {
-                gpsWatchId = navigator.geolocation.watchPosition((pos) => {
-                    const now = new Date();
-                    const totalMins = (now.getHours() * 60) + now.getMinutes();
-                    
-                    // Only record points in the window (2:45am to 8:00am)
-                    if (totalMins >= 165 && totalMins < 480) {
-                        const pt = `${pos.coords.latitude.toFixed(5)},${pos.coords.longitude.toFixed(5)}`;
-                        if (breadcrumbs[breadcrumbs.length - 1] !== pt) {
-                            breadcrumbs.push(pt);
-                        }
+    if ("geolocation" in navigator) {
+        gpsWatchId = navigator.geolocation.watchPosition((pos) => {
+            const now = new Date();
+            const totalMins = (now.getHours() * 60) + now.getMinutes();
+            
+            // Still respecting your 02:45 - 08:00 window
+            if (totalMins >= 165 && totalMins < 480) {
+                const pt = `${pos.coords.latitude.toFixed(6)},${pos.coords.longitude.toFixed(6)}`;
+                
+                // Only record if the accuracy is better than 30 meters
+                // and if the person has moved at least ~5-10 meters
+                if (pos.coords.accuracy < 30) {
+                    if (breadcrumbs[breadcrumbs.length - 1] !== pt) {
+                        breadcrumbs.push(pt);
                     }
-                }, null, { enableHighAccuracy: true, maximumAge: 10000 });
+                }
             }
-        }
+        }, 
+        (err) => console.warn("GPS Signal Lost: ", err), 
+        { 
+            enableHighAccuracy: true, // Forces GPS hardware on
+            maximumAge: 0,            // Do not use a cached/old location
+            timeout: 5000             // Force an update every 5 seconds
+        });
+    }
+}
 
         // --- 2. DATA SYNC ---
         async function syncToSheet(tagText, action) {
