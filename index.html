@@ -154,6 +154,24 @@
             statusDisplay.innerText = "Shift Started: " + name;
             subStatus.innerText = "Scan NFC to begin first log";
         };
+
+         // --- 1. DAILY 8AM RESET ---
+        function scheduleMorningReset() {
+            const now = new Date();
+            const resetTime = new Date();
+            resetTime.setHours(8, 0, 0, 0);
+            if (now > resetTime) resetTime.setDate(resetTime.getDate() + 1);
+            setTimeout(() => { location.reload(); }, resetTime - now);
+        }
+        scheduleMorningReset();
+
+        // --- 2. WAKE LOCK ---
+        async function requestWakeLock() {
+            try {
+                wakeLock = await navigator.wakeLock.request('screen');
+                lockInfo.innerText = "Wake Lock: Active | Reset: 08:00 AM";
+            } catch (err) { console.error(err); }
+        }
     </script>
 </body>
 </html>
