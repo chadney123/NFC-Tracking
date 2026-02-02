@@ -26,7 +26,7 @@
         <button id="startBtn">Begin Shift</button>
     </div>
 
-    <div id="info">GPS active from Login | Tracking: 02:45 - 08:00</div>
+    <div id="info">Active Login | Reset 08:00am</div>
 
     <script>
         const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxNyl59VKRoc5Ae6VtO2A0xPOkPk9QFdA8Lw6IBb5HSWfX6mkGqYvtrO7_0Z1jcyCB6CQ/exec"; 
@@ -108,7 +108,7 @@
                         activeTag = null;
                         body.classList.remove('amber');
                         statusDisplay.innerText = "Location Cleared";
-                        subStatus.innerText = "Ready for next checkpoint";
+                        subStatus.innerText = "Ready for next Location";
                         setTimeout(() => {
                             statusDisplay.innerText = "Shift in Progress";
                             subStatus.innerText = "Scan NFC to log movement";
